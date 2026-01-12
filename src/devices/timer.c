@@ -30,6 +30,12 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 
+// create a sleep list
+static struct list sleep_list;
+
+// wakeup_tick
+static int64_t wakeup_tick;
+
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -37,6 +43,8 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+  // init the sleep list
+  list_init (&sleep_list);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -84,16 +92,46 @@ timer_elapsed (int64_t then)
   return timer_ticks () - then;
 }
 
+// helper function to compare the wakeup tick
+static bool
+wake_tick_less (const struct list_elem *a,
+                const struct list_elem *b,
+                void *aux UNUSED)
+{
+  const struct thread *ta = list_entry (a, struct thread, sleep_elem);
+  const struct thread *tb = list_entry (b, struct thread, sleep_elem);
+  return ta->wake_tick < tb->wake_tick;
+}
+
+
+
 /* Sleeps for approximately TICKS timer ticks.  Interrupts must
    be turned on. */
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
+  // int64_t start = timer_ticks ();
+
+  // ASSERT (intr_get_level () == INTR_ON);
+  // while (timer_elapsed (start) < ticks) 
+  //   thread_yield ();
 
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+
+  enum intr_level old = intr_disable ();
+
+  // get the current thread
+  struct thread *current_thread = thread_current ();
+  // record the wakeup tick
+  current_thread->wake_tick = timer_ticks () + ticks;
+  // add the thread to the sleep list in order
+  list_insert_ordered (&sleep_list, &current_thread->sleep_elem, wake_tick_less, NULL);
+
+  // block the thread
+  thread_block ();
+
+  // restore the interrupt level
+  intr_set_level (old);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -171,6 +209,18 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  
+  // a loop to wake up the threads
+  while (!list_empty (&sleep_list)) {
+    struct thread *first_thread = list_entry (list_front (&sleep_list), struct thread, sleep_elem);
+    if (timer_ticks () >= first_thread->wake_tick) {
+      thread_unblock (first_thread);
+      list_pop_front (&sleep_list);
+      continue;
+    }
+    break;
+  }
+
   thread_tick ();
 }
 
