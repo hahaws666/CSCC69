@@ -30,6 +30,14 @@ bool lock_try_acquire (struct lock *);
 void lock_release (struct lock *);
 bool lock_held_by_current_thread (const struct lock *);
 
+
+// ************************** helper functions **************************
+extern bool cond_sema_priority_more (const struct list_elem *a,
+  const struct list_elem *b,
+  void *aux );
+
+
+// ************************** end of helper functions **************************
 /* Condition variable. */
 struct condition 
   {

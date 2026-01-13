@@ -90,10 +90,15 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
+
+    // ************************** new added members **************************
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
     struct list_elem sleep_elem;        /* List element for sleep list. */
     int64_t wakeup_tick;                  /* Wakeup tick. */
+
+    // ************************** end of new added members **************************
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -103,6 +108,14 @@ struct thread
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
   };
+
+
+// ************************** helper functions **************************
+extern bool cmp_priority (const struct list_elem *a,
+                          const struct list_elem *b,
+                          void *aux );
+
+
 
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
@@ -139,5 +152,8 @@ int thread_get_nice (void);
 void thread_set_nice (int);
 int thread_get_recent_cpu (void);
 int thread_get_load_avg (void);
+
+void thread_sleep (int64_t wakeup_tick);
+
 
 #endif /* threads/thread.h */
