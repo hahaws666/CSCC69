@@ -94,13 +94,13 @@ timer_elapsed (int64_t then)
 
 // helper function to compare the wakeup tick
 static bool
-wake_tick_less (const struct list_elem *a,
+wakeup_tick_less (const struct list_elem *a,
                 const struct list_elem *b,
                 void *aux UNUSED)
 {
   const struct thread *ta = list_entry (a, struct thread, sleep_elem);
   const struct thread *tb = list_entry (b, struct thread, sleep_elem);
-  return ta->wake_tick < tb->wake_tick;
+  return ta->wakeup_tick < tb->wakeup_tick;
 }
 
 
@@ -116,23 +116,55 @@ timer_sleep (int64_t ticks)
   // while (timer_elapsed (start) < ticks) 
   //   thread_yield ();
 
-  ASSERT (intr_get_level () == INTR_ON);
+  // ASSERT (intr_get_level () == INTR_ON);
 
-  enum intr_level old = intr_disable ();
+  // enum intr_level old = intr_disable ();
 
-  // get the current thread
-  struct thread *current_thread = thread_current ();
-  // record the wakeup tick
-  current_thread->wake_tick = timer_ticks () + ticks;
-  // add the thread to the sleep list in order
-  list_insert_ordered (&sleep_list, &current_thread->sleep_elem, wake_tick_less, NULL);
+  // // get the current thread
+  // struct thread *current_thread = thread_current ();
+  // // record the wakeup tick
+  // current_thread->wake_tick = timer_ticks () + ticks;
+  // // add the thread to the sleep list in order
+  // list_insert_ordered (&sleep_list, &current_thread->sleep_elem, wake_tick_less, NULL);
 
-  // block the thread
+  // // block the thread
+  // thread_block ();
+
+  // // restore the interrupt level
+  // intr_set_level (old);
+
+
+  // or we can write the code in a more efficient way
+  int64_t start = timer_ticks ();
+  if(ticks<0) {
+    return;
+  }
+
+  // if the time is not enough, sleep the thread
+  if (timer_elapsed (start) < ticks) {
+    thread_sleep(start + ticks);
+  }
+}
+
+
+// function to sleep the thread
+void
+thread_sleep (int64_t wakeup_tick)
+{
+  enum intr_level old_level = intr_disable ();
+
+  struct thread *cur = thread_current ();
+  cur->wakeup_tick = wakeup_tick;
+
+  /* 插入 sleep_list（有序插入，方便中断里从队头一直唤醒） */
+  list_insert_ordered (&sleep_list, &cur->sleep_elem, wakeup_tick_less, NULL);
+
+  /* 真正睡：进入 blocked，等待中断唤醒 */
   thread_block ();
 
-  // restore the interrupt level
-  intr_set_level (old);
+  intr_set_level (old_level);
 }
+
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
    turned on. */
@@ -213,7 +245,7 @@ timer_interrupt (struct intr_frame *args UNUSED)
   // a loop to wake up the threads
   while (!list_empty (&sleep_list)) {
     struct thread *first_thread = list_entry (list_front (&sleep_list), struct thread, sleep_elem);
-    if (timer_ticks () >= first_thread->wake_tick) {
+    if (timer_ticks () >= first_thread->wakeup_tick) {
       thread_unblock (first_thread);
       list_pop_front (&sleep_list);
       continue;
