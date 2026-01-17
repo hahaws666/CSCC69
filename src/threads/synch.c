@@ -230,9 +230,14 @@ lock_init (struct lock *lock)
 void
 lock_acquire (struct lock *lock)
 {
+
+  // fprintf (stderr, "lock_acquire:\n");
+  struct thread *current_thread = thread_current ();
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+
+  // if the lock is not avialable, store the thread in the waiters list
 
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();

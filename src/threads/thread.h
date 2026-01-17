@@ -89,12 +89,14 @@ struct thread
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
+    struct list_elem wait_elem;      /* List element for waiters list. */
+    struct list_elem elem;         /* List element for elligible threads list. */
 
 
     // ************************** new added members **************************
 
     /* Shared between thread.c and synch.c. */
-    struct list_elem elem;              /* List element. */
+    struct list_elem donation_elem;              /* List element. */
     struct list_elem sleep_elem;        /* List element for sleep list. */
     int64_t wakeup_tick;                  /* Wakeup tick. */
 
@@ -107,6 +109,12 @@ struct thread
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+
+    // ************************** new added members **************************
+    struct list donation_list;          /* List of threads that have donated priority to this thread. */
+    struct lock *wait_on_lock;          /* Lock that this thread is waiting on. */
+    int base_priority;            /* Base priority of this thread. */
+    // ************************** end of new added members **************************
   };
 
 
