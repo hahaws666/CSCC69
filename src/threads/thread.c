@@ -504,6 +504,8 @@ init_thread (struct thread *t, const char *name, int priority)
   list_init (&t->donation_list);
   t->wait_on_lock = NULL;
   t->base_priority = priority;
+  t->waiting_lock = NULL;
+  list_init (&t->locks_held);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

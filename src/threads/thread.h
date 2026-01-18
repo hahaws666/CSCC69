@@ -114,6 +114,10 @@ struct thread
     struct list donation_list;          /* List of threads that have donated priority to this thread. */
     struct lock *wait_on_lock;          /* Lock that this thread is waiting on. */
     int base_priority;            /* Base priority of this thread. */
+
+    struct lock *waiting_lock;          /* Lock that this thread is waiting on. */
+    struct list locks_held;             /* List of locks that this thread is holding. */
+    struct list_elem locks_held_elem;   /* List element for locks_held list. */
     // ************************** end of new added members **************************
   };
 

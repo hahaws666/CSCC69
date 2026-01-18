@@ -62,6 +62,66 @@ cond_sema_priority_more (const struct list_elem *a,
 }
 
 
+
+
+/* ---------- Helpers for priority donation ---------- */
+
+static int
+sema_max_waiter_priority (struct semaphore *sema)
+{
+  int max_p = -1;
+  struct list_elem *e;
+
+  for (e = list_begin (&sema->waiters);
+       e != list_end (&sema->waiters);
+       e = list_next (e))
+    {
+      struct thread *t = list_entry (e, struct thread, elem);
+      if (t->priority > max_p)
+        max_p = t->priority;
+    }
+  return max_p;
+}
+
+static void
+thread_refresh_priority (struct thread *t)
+{
+  int new_p = t->base_priority;
+  struct list_elem *e;
+
+  for (e = list_begin (&t->locks_held);
+       e != list_end (&t->locks_held);
+       e = list_next (e))
+    {
+      struct lock *l = list_entry (e, struct lock, elem);
+      int wmax = sema_max_waiter_priority (&l->semaphore);
+      if (wmax > new_p)
+        new_p = wmax;
+    }
+
+  t->priority = new_p;
+}
+
+static void
+donate_priority_chain (struct thread *donor, struct lock *lock)
+{
+  /* Limit donation depth to avoid infinite loops. */
+  int depth = 0;
+  struct thread *t = lock->holder;
+
+  while (t != NULL && donor->priority > t->priority && depth < 8)
+    {
+      t->priority = donor->priority;
+      if (t->waiting_lock == NULL)
+        break;
+      t = t->waiting_lock->holder;
+      depth++;
+    }
+}
+
+/* ---------- lock_acquire / lock_release with donation ---------- */
+
+
 // ************************** end of helper functions **************************
 
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
@@ -227,21 +287,35 @@ lock_init (struct lock *lock)
    interrupt handler.  This function may be called with
    interrupts disabled, but interrupts will be turned back on if
    we need to sleep. */
-void
-lock_acquire (struct lock *lock)
-{
-
-  // fprintf (stderr, "lock_acquire:\n");
-  struct thread *current_thread = thread_current ();
-  ASSERT (lock != NULL);
-  ASSERT (!intr_context ());
-  ASSERT (!lock_held_by_current_thread (lock));
-
-  // if the lock is not avialable, store the thread in the waiters list
-
-  sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
-}
+   void
+   lock_acquire (struct lock *lock)
+   {
+     struct thread *cur = thread_current ();
+   
+     ASSERT (lock != NULL);
+     ASSERT (!intr_context ());
+     ASSERT (!lock_held_by_current_thread (lock));
+   
+     enum intr_level old_level = intr_disable ();
+   
+     if (lock->holder != NULL)
+       {
+         cur->waiting_lock = lock;
+         donate_priority_chain (cur, lock);
+       }
+   
+     intr_set_level (old_level);
+   
+     /* Actually wait for the lock. */
+     sema_down (&lock->semaphore);
+   
+     /* Now we have the lock. */
+     old_level = intr_disable ();
+     cur->waiting_lock = NULL;
+     lock->holder = cur;
+     list_push_back (&cur->locks_held, &lock->elem);
+     intr_set_level (old_level);
+   }
 
 /* Tries to acquires LOCK and returns true if successful or false
    on failure.  The lock must not already be held by the current
@@ -268,15 +342,32 @@ lock_try_acquire (struct lock *lock)
    An interrupt handler cannot acquire a lock, so it does not
    make sense to try to release a lock within an interrupt
    handler. */
-void
-lock_release (struct lock *lock) 
-{
-  ASSERT (lock != NULL);
-  ASSERT (lock_held_by_current_thread (lock));
-
-  lock->holder = NULL;
-  sema_up (&lock->semaphore);
-}
+   void
+   lock_release (struct lock *lock)
+   {
+     ASSERT (lock != NULL);
+     ASSERT (lock_held_by_current_thread (lock));
+   
+     enum intr_level old_level = intr_disable ();
+   
+     /* Drop ownership first. */
+     lock->holder = NULL;
+   
+     /* Remove from held locks list. */
+     list_remove (&lock->elem);
+   
+     /* Restore priority based on remaining held locks. */
+     thread_refresh_priority (thread_current ());
+   
+     intr_set_level (old_level);
+   
+     /* Wake one waiter (highest priority if sema_up is correct). */
+     sema_up (&lock->semaphore);
+   
+     /* If someone higher priority is ready, yield. */
+     thread_yield ();
+   }
+   
 
 /* Returns true if the current thread holds LOCK, false
    otherwise.  (Note that testing whether some other thread holds
